@@ -1,3 +1,4 @@
+from math import log
 import streamlit as st
 from sympy import symbols, sympify, lambdify
 import numpy as np
@@ -32,14 +33,14 @@ def syntax_check(s: str) -> bool:
 
 # 1. Split and Extact each line
 split_re = re.compile(r"(.*:)([^:]\D*=)([^=].*)")
+clean_re = re.compile(r" *:* *")
 lines = [s.strip() for s in definitions.split("\n") if s.strip()]
 func_dict = {
-    re.sub(" *:* *", "", name): expr.replace(" ", "")
+    clean_re.sub("", name): expr.replace(" ", "")
     for name, expr in map(
         lambda x: split_re.match(x).group(1, 3), filter(syntax_check, lines)
     )
 }
-print(f"1. func_dict: {func_dict}")
 
 
 # 2. Dereference all the dependency chain of functions
@@ -55,25 +56,32 @@ for _ in range(1000):
     new_func_dict = dict(
         map(lambda kv: (kv[0], deref_func(func_dict, kv[1])), func_dict.items())
     )
-    print(f"new_func_dict:{new_func_dict} vs func_dict:{func_dict}")
     if new_func_dict == func_dict:
         break
     func_dict = new_func_dict
 else:
     st.error("Stack Overflow when dereferencing functions")
-print(f"2. func_dict: {func_dict}")
 
-# 3. Plot all the functions
+# 3. Parse expression into lambda function
 x = symbols("x")
-func_dict = {
-    fn: lambdify(x, sympify(expr), modules=["numpy"]) for fn, expr in func_dict.items()
-}
-print(f"3. func_dict: {func_dict}")
+lambda_dict = {}
+for fn, expr in func_dict.items():
+    try:
+        lambda_dict[fn] = lambdify(x, sympify(expr), modules=["numpy"])
+    except Exception as e:
+        st.error(f"Unable to parse function {fn}:{expr} - {e}")
 
+
+# 4. Plot graph
+x_min = st.sidebar.number_input("X-axis minimum", value=-10.0)
+x_max = st.sidebar.number_input("X-axis maximum", value=10.0)
+if x_min >= x_max:
+    st.error("X-axis minimum must be less than X-axis maximum")
+    x_min, x_max = (-10.0, 10.0)
 fig = px.line(title="Function Plots")
-x_grid = np.linspace(-10, 10, 1000)
+x_grid = np.linspace(x_min, x_max, int(1000 * np.log10(x_max - x_min)))
 try:
-    for fn, f in func_dict.items():
+    for fn, f in lambda_dict.items():
         fig.add_scatter(x=x_grid, y=f(x_grid), name=fn)
 except Exception as e:
     st.error(f"Error plotting functions: {e}")
