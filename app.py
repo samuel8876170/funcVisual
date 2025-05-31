@@ -6,42 +6,86 @@ from scipy.optimize import brentq
 import plotly.express as px
 import re
 
-# Sidebar for definitions
+#   Sidebar for definitions
 st.sidebar.title("Definitions")
 definitions = st.sidebar.text_area("Enter definitions here, one per line:", height=300)
 
-# Instructions
+#   Instructions
 st.sidebar.markdown("""
 ### Instructions
-- Define functions as `name: y = expression`, e.g., `A: y = x + 2`
-- Functions can reference other functions, e.g. `B: y = 2*A + 3*x^2`
+- Define functions as `name: y = expression`
+    - e.g., `A: x + 2`
+- Functions can reference other functions
+    - e.g. `B: 2*A + 3*x^2`
+- Functions can be conditional,
+    - e.g. `C: {0 if x < 0.5, x-0.5 otherwise}-5.5`
+- Functions can be aggregated
+    - e.g. `D: A - {0 if x < 3, x-3 otherwise}+3.5`
 """)
 
 
 def syntax_check(s: str) -> bool:
+    """Check all functions' syntax"""
     if s.count(":") != 1:
         st.error(f'Non-unique Assignment ":" - {s}')
         return False
-    if s.count("=") != 1:
-        st.error(f'Non-unique Formula Operation "=" - {s}')
+    condc = s.count("{") + s.count("}")
+    if condc % 2 == 1:
+        st.error(
+            f"Conditional expression is not well defined inside brackets {{}} - {s}"
+        )
+        return False
+    if s.count("otherwise") != condc // 2:
+        st.error(
+            f'Every conditional expression should have "otherwise" term at the end - {s}'
+        )
         return False
     return True
 
 
-# 1. Split and Extact each line
-split_re = re.compile(r"(.*:)([^:]\D*=)([^=].*)")
+#   Split and Extact each line
+split_re = re.compile(r"([^\n]*):([^\n]*)")
 clean_re = re.compile(r" *:* *")
+cond_re = re.compile(r"\{([^}]*)\}")
+chaineq_re = re.compile(
+    r"(-?\d*\.?\d+)\s*(>=|>|<|<=)\s*([a-zA-Z]+)\s*(>=|>|<|<=)\s*(-?\d*\.?\d+)"
+)
 lines = [s.strip() for s in definitions.split("\n") if s.strip()]
 func_dict = {
     clean_re.sub("", name): expr.replace(" ", "")
     for name, expr in map(
-        lambda x: split_re.match(x).group(1, 3), filter(syntax_check, lines)
+        lambda x: split_re.match(x).group(1, 2), filter(syntax_check, lines)
     )
 }
 
 
-# 2. Dereference all the dependency chain of functions
+def translate_conditional(expr: str) -> str:
+    """Translate user conditional expr to sympy Piecewise"""
+    m = cond_re.finditer(expr)
+    if not m:
+        return expr
+    for g in map(lambda x: x.group(), m):
+        expr = expr.replace(
+            g,
+            "Piecewise("
+            + ",".join(
+                map(
+                    lambda x: f"({x.replace('if', ',').replace('otherwise', ',True')})",
+                    g[1:-1].split(","),
+                )
+            )
+            + ")",
+        )
+    return chaineq_re.sub(r"\1 \2 \3 & \3 \4 \5", expr)
+
+
+func_dict = dict(
+    map(lambda kv: (kv[0], translate_conditional(kv[1])), func_dict.items())
+)
+
+
 def deref_func(d: dict, expr: str) -> str:
+    """Dereference all the dependency chain of functions"""
     r = expr
     for fn in d:
         if fn in r:
@@ -59,7 +103,8 @@ for _ in range(1000):
 else:
     st.error("Stack Overflow when dereferencing functions")
 
-# 3. Parse expression into lambda function
+
+#   Parse expression into lambda function
 x = symbols("x")
 lambda_dict = {}
 for fn, expr in func_dict.items():
@@ -69,7 +114,7 @@ for fn, expr in func_dict.items():
         st.error(f"Unable to parse function {fn}:{expr} - {e}")
 
 
-# 4. Plot graph
+#   Plot graph
 x_min = st.sidebar.number_input("X-axis minimum", value=-10.0)
 x_max = st.sidebar.number_input("X-axis maximum", value=10.0)
 x_step = int(1000 * np.log10(x_max - x_min))
@@ -87,7 +132,7 @@ except Exception as e:
 st.plotly_chart(fig, use_container_width=True)
 
 
-# 5. Calculate all intersections to X/Y-axis
+#   Calculate all intersections to X/Y-axis
 def find_roots(f, a, b, num_points=1000):
     x_grid = np.linspace(a, b, num_points)
     y_grid = f(x_grid)
