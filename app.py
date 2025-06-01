@@ -8,7 +8,14 @@ import re
 
 #   Sidebar for definitions
 st.sidebar.title("Definitions")
-definitions = st.sidebar.text_area("Enter definitions here, one per line:", height=300)
+SAMPLE_DEFINITIONS = """
+A: 2^0.5*x
+B: -A+3
+C: {0 if x<0.5, x-0.5 otherwise}-5.5
+D: {0 if x<3, x-3 otherwise}-3.5
+E: C-D
+"""
+definitions = st.sidebar.text_area("Enter definitions here, one per line:", height=300, value=SAMPLE_DEFINITIONS)
 
 #   Instructions
 st.sidebar.markdown("""
@@ -31,14 +38,10 @@ def syntax_check(s: str) -> bool:
         return False
     condc = s.count("{") + s.count("}")
     if condc % 2 == 1:
-        st.error(
-            f"Conditional expression is not well defined inside brackets {{}} - {s}"
-        )
+        st.error(f"Conditional expression is not well defined inside brackets {{}} - {s}")
         return False
     if s.count("otherwise") != condc // 2:
-        st.error(
-            f'Every conditional expression should have "otherwise" term at the end - {s}'
-        )
+        st.error(f'Every conditional expression should have "otherwise" term at the end - {s}')
         return False
     return True
 
@@ -47,16 +50,9 @@ def syntax_check(s: str) -> bool:
 split_re = re.compile(r"([^\n]*):([^\n]*)")
 clean_re = re.compile(r" *:* *")
 cond_re = re.compile(r"\{([^}]*)\}")
-chaineq_re = re.compile(
-    r"(-?\d*\.?\d+)\s*(>=|>|<|<=)\s*([a-zA-Z]+)\s*(>=|>|<|<=)\s*(-?\d*\.?\d+)"
-)
+chaineq_re = re.compile(r"(-?\d*\.?\d+)\s*(>=|>|<|<=)\s*([a-zA-Z]+)\s*(>=|>|<|<=)\s*(-?\d*\.?\d+)")
 lines = [s.strip() for s in definitions.split("\n") if s.strip()]
-func_dict = {
-    clean_re.sub("", name): expr.replace(" ", "")
-    for name, expr in map(
-        lambda x: split_re.match(x).group(1, 2), filter(syntax_check, lines)
-    )
-}
+func_dict = {clean_re.sub("", name): expr.replace(" ", "") for name, expr in map(lambda x: split_re.match(x).group(1, 2), filter(syntax_check, lines))}
 
 
 def translate_conditional(expr: str) -> str:
@@ -65,23 +61,11 @@ def translate_conditional(expr: str) -> str:
     if not m:
         return expr
     for g in map(lambda x: x.group(), m):
-        expr = expr.replace(
-            g,
-            "Piecewise("
-            + ",".join(
-                map(
-                    lambda x: f"({x.replace('if', ',').replace('otherwise', ',True')})",
-                    g[1:-1].split(","),
-                )
-            )
-            + ")",
-        )
+        expr = expr.replace(g, "Piecewise(" + ",".join(map(lambda x: f"({x.replace('if', ',').replace('otherwise', ',True')})", g[1:-1].split(","))) + ")")
     return chaineq_re.sub(r"\1 \2 \3 & \3 \4 \5", expr)
 
 
-func_dict = dict(
-    map(lambda kv: (kv[0], translate_conditional(kv[1])), func_dict.items())
-)
+func_dict = dict(map(lambda kv: (kv[0], translate_conditional(kv[1])), func_dict.items()))
 
 
 def deref_func(d: dict, expr: str) -> str:
@@ -94,9 +78,7 @@ def deref_func(d: dict, expr: str) -> str:
 
 
 for _ in range(1000):
-    new_func_dict = dict(
-        map(lambda kv: (kv[0], deref_func(func_dict, kv[1])), func_dict.items())
-    )
+    new_func_dict = dict(map(lambda kv: (kv[0], deref_func(func_dict, kv[1])), func_dict.items()))
     if new_func_dict == func_dict:
         break
     func_dict = new_func_dict
